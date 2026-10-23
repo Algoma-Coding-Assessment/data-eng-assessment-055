@@ -1,0 +1,18 @@
+services:
+  postgis:
+    image: postgis/postgis:17-3.5
+    environment:
+      POSTGRES_USER: takehome
+      POSTGRES_PASSWORD: takehome
+      POSTGRES_DB: takehome
+    ports:
+      - "${POSTGIS_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U takehome"]
+      interval: 2s
+      retries: 30
+
+volumes:
+  pgdata:
