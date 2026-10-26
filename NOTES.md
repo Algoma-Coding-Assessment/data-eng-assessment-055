@@ -32,47 +32,28 @@ The checks behind the decisions below are in the notebooks, cited by step:
 
 ### Part 1: the layer
 
-Every county gets two numbers, computed from FHFA's `HPI` column for one latest year **L**:
+Each county gets two numbers from FHFA's `HPI`, using one latest year **L**:
+- `hpi_yoy_pct`: the change from L-1 to L.
+- `hpi_cagr_5y_pct`: the average yearly growth from L-5 to L.
 
-```
-hpi_yoy_pct     = (HPI[L] / HPI[L-1] - 1) * 100
-hpi_cagr_5y_pct = ((HPI[L] / HPI[L-5]) ^ (1/5) - 1) * 100
-```
+For example, Autauga County, AL (next release): HPI is 193.66 in 2020, 280.45 in 2024 and 285.46 in 2025, so YoY = 1.79% and the 5-year CAGR = 8.07%.
 
-For example, Autauga County, AL in the next release: HPI is 193.66 in 2020, 280.45 in 2024 and 285.46 in 2025, so YoY = 1.79% and 5-year CAGR = 8.07%. Only those three years are read; the years in between don't enter either formula.
+| Decision | Why |
+|---|---|
+| **L is one year for the whole release**: 2024 for the old release, 2025 for the next. | Using each county's own last year would mix years on one map. 2025 is a complete year: 2,677 counties have a value, against 2,666 in 2024 ([03, Step 2](notebooks/03_part1_layer.ipynb)). |
+| **A missing year gives a blank value**, never the nearest year instead. | About 400 counties have gaps in their series. Filling in from another year would show a two-year change as a one-year change ([03, Step 3](notebooks/03_part1_layer.ipynb)). |
+| **`status` says which year is missing** (table below). | So an analyst can see why a county is blank ([03, Step 4](notebooks/03_part1_layer.ipynb)). |
+| **All 3,144 counties are in the layer**, with or without data. | The map has no holes. In the old release, Connecticut is blank here because FHFA still uses the pre-2022 county codes; Part 2 fills it. |
+| **The GeoJSON is simplified as one piece** (6.5 MB). | Simplifying each county separately opens gaps between neighbours. The file is checked after writing ([03, Step 8](notebooks/03_part1_layer.ipynb)). |
 
-**1. Which year is "latest"**
-- **Chosen:** one year for the whole release, the newest year whose county coverage is at least 90% of the year before. That gives **2024** for the old release and **2025** for the next one.
-- **Rejected:** each county's own last year with data. 154 counties (old) and 118 (next) have their last value before L. They would show, say, 2021 vs 2020 on a map labelled with the latest year, and nothing on the map would say so.
-- **Checked:** 2025 is a complete year in the next release. Every county in the file has a 2025 row, 2,677 have a value (2024: 2,666), and the number of counties gaining or losing a value is in line with earlier years ([03, Step 2](notebooks/03_part1_layer.ipynb)). Each FHFA release re-estimates the whole history rather than updating some counties: 98,672 of the 102,710 county-years in both releases changed ([01, section 1, "Revisions between releases"](notebooks/01_explore_data.ipynb)).
-
-**2. Missing years give a blank, never a substitute**
-- **Chosen:** if HPI[L] or HPI[L-1] is missing, YoY is blank. If HPI[L] or HPI[L-5] is missing, the CAGR is blank.
-- **Rejected:** using the nearest available year. About 400 county series have gaps; e.g. Coosa, AL has 2022, a blank 2023, then 2024. Bridging the gap would present a two-year change as a one-year change ([01, section 1, "Gaps inside series"](notebooks/01_explore_data.ipynb); [03, Step 3](notebooks/03_part1_layer.ipynb)).
-- FHFA's own `Annual Change (%)` column agrees with the HPI ratio to rounding (max difference 0.017 pt), but it can't give the 5-year figure. Both metrics come from the `HPI` column so they're consistent ([01, section 1](notebooks/01_explore_data.ipynb)).
-
-**3. `status` says which input is missing**
-
-| Status | Meaning | Old (2024) | Next (2025) |
+| `status` | Missing | Old (2024) | Next (2025) |
 |---|---|---|---|
-| `published` | HPI[L], HPI[L-1] and HPI[L-5] present: both values are FHFA's | 2,543 | 2,611 |
-| `partial_no_yoy` | HPI[L-1] missing: CAGR only | 76 | 63 |
-| `partial_no_cagr` | HPI[L-5] missing: YoY only | 2 | 1 |
-| `no_prior_years` | both HPI[L-1] and HPI[L-5] missing | 4 | 2 |
-| `no_latest` | the county is in FHFA's file but HPI[L] is blank | 154 | 118 |
+| `published` | nothing: both values are FHFA's | 2,543 | 2,611 |
+| `partial_no_yoy` | L-1, so no YoY | 76 | 63 |
+| `partial_no_cagr` | L-5, so no CAGR | 2 | 1 |
+| `no_prior_years` | L-1 and L-5 | 4 | 2 |
+| `no_latest` | L (the county is in FHFA's file) | 154 | 118 |
 | `not_in_fhfa` | the county isn't in FHFA's file | 365 | 349 |
-
-A single "missing" status would hide *why* a county is blank, and whether its other value is still FHFA's own ([03, Step 4](notebooks/03_part1_layer.ipynb)).
-
-**4. Which counties are in the layer**
-- All **3,144** counties of the 2024 Census boundaries (50 states + DC) appear exactly once, with or without data, so the map has no holes.
-- In the old release, FHFA still reports Connecticut's 8 pre-2022 counties, which don't exist in the 2024 boundaries (9 planning regions). In Part 1 the 9 regions are therefore `not_in_fhfa`, and Part 2 fills them ([03, Step 5](notebooks/03_part1_layer.ipynb)).
-
-**5. The web GeoJSON (≤ 8 MB, no gaps or overlaps)**
-- **Chosen:** simplify all counties together with `shapely.coverage_simplify` (tolerance 0.005°), so each shared border is simplified once and both neighbours keep it. Coordinates are rounded to 5 decimals (~1 m). The file is 6.5 MB, and after writing it is read back and checked: valid, no overlaps, and no new gaps.
-- **Rejected:** simplifying each county on its own. The two copies of a shared border move differently and open slivers. Of the other tolerances, 0.002° breaks shared borders after rounding and 0.01° opens a new gap.
-- The Census file itself already has 23 narrow openings between neighbouring counties: real water channels along coasts, because the file is clipped to the shoreline. The check is therefore "no gaps beyond those", not "zero gaps" ([03, Step 8](notebooks/03_part1_layer.ipynb)).
-- `counties.parquet` keeps the full-resolution shapes. Both files are in WGS84 (EPSG:4326).
 
 ### Part 2: fewer blanks
 
@@ -181,8 +162,6 @@ Smaller cold spots include Minneapolis–St Paul (Hennepin, Ramsey, Dakota). The
 - **Mixed geography vintages.** The ZCTA-to-county file is 2020 vintage (pre-2022 CT counties), the housing units are ACS 2020–2024, and the boundaries are 2024.
 
 ## How I used AI
-
-> Draft written with the assistant from our session; edit into your own words before submitting.
 
 I worked with Claude Code throughout. I used it to:
 - profile the raw files ([01](notebooks/01_explore_data.ipynb));
